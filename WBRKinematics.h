@@ -1,6 +1,4 @@
-#ifndef WBR_KINEMATICS_H
-#define WBR_KINEMATICS_H
-
+#pragma once
 #include <cmath>
 #include <algorithm>
 
@@ -41,5 +39,3 @@ private:
     inline double deg2rad(double deg) const { return deg * M_PI / 180.0; }
     inline double rad2deg(double rad) const { return rad * 180.0 / M_PI; }
 };
-
-#endif // WBR_KINEMATICS_H
