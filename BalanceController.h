@@ -25,4 +25,6 @@ private:
     LKMotor _wheelRight{WHEEL_RIGHT_CFG.id, WHEEL_RIGHT_CFG.reduction, WHEEL_RIGHT_CFG.bus};
     bool _enabled = false;
     uint32_t _lastControlMs = 0;
+    double _filteredPitch = 0.0; 
+    double _alpha = 0.3; // 濾波係數：根據實際震盪情況調整 (建議範圍 0.1 ~ 0.5)
 };

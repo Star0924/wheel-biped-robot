@@ -12,6 +12,7 @@ void BalanceController::enable() {
     _wheelRight.Write_Motor_Enable();
     _pid.init(0.0);
     _enabled = true;
+    _filteredPitch = _imu.getData().angle[1];
     Serial.println(">>> 輪子已啟動，開始平衡");
 }
 
@@ -31,7 +32,9 @@ void BalanceController::update(RobotState &state) {
 
     double pitch = _imu.getData().angle[1];
 
-    if (fabs(pitch) > FALL_LIMIT_DEG) {
+    _filteredPitch = (_alpha * pitch) + ((1.0 - _alpha) * _filteredPitch);
+
+    if (fabs(_filteredPitch) > FALL_LIMIT_DEG) {
         if (_enabled) {
             disable();
             state = RobotState::FALLEN;
@@ -41,7 +44,8 @@ void BalanceController::update(RobotState &state) {
     }
 
     if (_enabled) {
-        double out = _pid.compute(TARGET_ANGLE_DEG, pitch);
+        // PID 計算改用濾波後的平滑角度
+        double out = _pid.compute(TARGET_ANGLE_DEG, _filteredPitch);
         _wheelLeft.Write_angularvel_MultiRound(WHEEL_LEFT_SIGN * out);
         _wheelRight.Write_angularvel_MultiRound(WHEEL_RIGHT_SIGN * out);
     }
