@@ -82,6 +82,20 @@ void HWT906::zeroYaw() {
 //     save();
 // }
 
+void HWT906::switchTo9Axis(){
+    unlock();
+    delay(200);
+    sendCommand(HWT906Cmd::AXIS9);
+    save();
+}
+
+void HWT906::switchTo6Axis(){
+    unlock();
+    delay(200);
+    sendCommand(HWT906Cmd::AXIS6);
+    save();
+}
+
 void HWT906::readAngle() {
     sendCommand(HWT906Cmd::READ_ANGLE);
 }

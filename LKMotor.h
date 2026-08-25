@@ -17,6 +17,7 @@ class LKMotor
     void Read_Motor_Status2();                                                  //(3)讀取馬達狀態2
     void Set_Motor_Origin();                                                    //(8)設置馬達零點
     void Read_Angle_MultiRound();                                               //(9)讀取多圈角度命令
+    void Write_Torque_MultiRound(double cur);                                   //(10)轉矩閉環控制命令
     void Write_angularvel_MultiRound(double angularvel);                        //(11)速度閉環控制命令1
     void Write_Motor_Disable();                                                 //(15)電機關機命令
     void Write_Motor_Enable();                                                  //(17)電機運行命令                                                  

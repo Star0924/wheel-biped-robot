@@ -11,6 +11,11 @@ PID::PID(double kp, double ki, double kd){
   _lastOutput = 0;
 }
 
+void PID::setOutputLimits(double outMin, double outMax) {
+  Outmin = outMin;
+  Outmax = outMax;
+}
+
 void PID::setpid(double kp, double ki, double kd){
   _kp = kp;
   _ki = ki;

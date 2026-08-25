@@ -1,34 +1,50 @@
 #pragma once
 
+#include <Arduino.h>
+#include "HWT906.h"
+#include "WBRKinematics.h"
+#include "pid.h"
+#include "LKMotor.h"
+#include "filter.h"
+
+// ================= 硬體與常數設定 =================
 #define IMU_SERIAL   Serial2
 #define IMU_BAUD     921600
-#define TERMINAL_BAUD 115200
 
-struct MotorConfig{
-  uint8_t id;
-  uint16_t reduction;
-  uint8_t bus;
-};
+#define WHEEL_LEFT_SIGN   (-1.0)
+#define WHEEL_RIGHT_SIGN  (+1.0)
 
-static const double BALANCE_KP = 40.0;
-static const double BALANCE_KI = 0.0;
-static const double BALANCE_KD = 0.0;
-static const double TARGET_ANGLE_DEG = 0.0;
-static const double FALL_LIMIT_DEG   = 40.0;
-static const long   JOINT_LOCK_SPEED = 20;
-
-static const MotorConfig WHEEL_LEFT_CFG  = {4, 8, 5};
-static const MotorConfig WHEEL_RIGHT_CFG = {1, 8, 5};
-
-static const MotorConfig HIP_LEFT_CFG   = {6, 10, 5};
-static const MotorConfig KNEE_LEFT_CFG  = {5, 10, 5};
-static const MotorConfig HIP_RIGHT_CFG  = {3, 10, 5};
-static const MotorConfig KNEE_RIGHT_CFG = {2, 10, 5};
-
-#define WHEEL_LEFT_SIGN  (+1.0)
-#define WHEEL_RIGHT_SIGN (-1.0)
-
-static const uint32_t CONTROL_PERIOD_MS = 10;   // 100Hz
-static const uint32_t PRINT_PERIOD_MS   = 100;  // 10Hz
+const int JOINT_COUNT         = 4;
+const long JOINT_LOCK_SPEED   = 20;   // 自鎖時的移動速度上限(deg/s)
+const double TARGET_ANGLE     = 0.0;  
+const double FALL_LIMIT_DEG   = 40.0; // 傾倒保護角
 
 
+// ================= 全域物件與變數宣告 (extern) =================
+// 告訴編譯器：這些變數存在，但實體定義在 config.cpp 中
+extern LKMotor wheelLeft;
+extern LKMotor wheelRight;
+extern LKMotor hipLeft;
+extern LKMotor kneeLeft;
+extern LKMotor hipRight;
+extern LKMotor kneeRight;
+
+extern LKMotor* jointMotors[4];
+extern const char* jointNames[4];
+
+extern HWT906 imu;
+extern PID CurrentPID;
+extern PID balancePID;
+extern PID velPID;
+extern KalmanFilter kalmanPitch;
+extern LowPassFilter lowPassPitch;
+extern MovingAverageFilter speedFilterLeft;
+extern MovingAverageFilter speedFilterRight;
+
+extern double finalFilteredPitch;
+extern bool wheelsEnabled;
+extern bool jointsLocked;
+extern double Avgspeed;
+extern double motorOutput;
+extern double torqueOutput;
+extern double targetangle;

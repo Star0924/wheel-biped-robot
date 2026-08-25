@@ -10,15 +10,16 @@ class PID{
     double _pv, _lastpv;
     double _lastD;
     double _lastOutput;
+    double Outmax = 1000;
+    double Outmin = -1000;
     const double Imax = 200; //之後要調整
     const double Imin = -200; //之後要調整
-    const double Outmax = 1500;
-    const double Outmin = -1500;
     const double _tau_f = 0.01;
 
   public:
     PID(double kp, double ki, double kd);
     void setpid(double kp, double ki, double kd);
     void init(double currentpos);
+    void setOutputLimits(double outMin, double outMax);
     double compute(double target, double currentpos);
 };

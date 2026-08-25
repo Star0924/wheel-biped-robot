@@ -95,6 +95,26 @@ void LKMotor::Read_Angle_MultiRound(){
   }
 }
 
+//(10)轉矩閉環控制命令
+void LKMotor::Write_Torque_MultiRound(double cur){
+  int16_t _current = (int16_t)(cur * 2048 / 33);   //換成馬達單位，33A對應2048
+
+  uint8_t data[2];
+
+  for(int i=0;i<2;i++)
+    data[i]=(_current>>(8*i))&0xFF;
+
+  sendFrame(0xA1,0x02,data);
+  // Read Package from motor
+  count_rx = 0;
+  RXWaitingStartTime = micros();
+  while ((micros() - RXWaitingStartTime) < RXWaitTime)
+  {
+    Unpack();
+  }
+}
+
+
 //(11)速度閉環控制命令
 void LKMotor::Write_angularvel_MultiRound(double angularvel){
 
@@ -216,6 +236,7 @@ void LKMotor::parseFrame(){
     {
         case 0x92:parseAngle();break;
         case 0x9C:parseStatus2();break;
+        case 0xA1:parseStatus2();break;
         case 0xA2:parseStatus2();break;
         case 0xA4:parseStatus2();break;
     }

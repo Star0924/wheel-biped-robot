@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include "HWT906_Parser.h"
 
+
 class HWT906{
   public:
     HWT906();
@@ -18,6 +19,8 @@ class HWT906{
     void calibrateAcc();         // 加速度校準
     // void startMagCalibration();  // 進入磁力計校正
     // void stopMagCalibration();   // 退出磁力計校正並儲存
+    void switchTo6Axis();        // 切換至 6軸模式
+    void switchTo9Axis();        // 切換至 9軸模式
     void readAngle();            // 主動詢問當前角度 (Polling Mode 用) 
   
   private:
