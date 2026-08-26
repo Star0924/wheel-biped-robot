@@ -14,7 +14,7 @@ class PID{
     double Outmin = -1000;
     const double Imax = 200; //之後要調整
     const double Imin = -200; //之後要調整
-    const double _tau_f = 0.01;
+    const double _tau_f = 0.01; 
 
   public:
     PID(double kp, double ki, double kd);

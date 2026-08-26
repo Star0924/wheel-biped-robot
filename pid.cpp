@@ -32,7 +32,7 @@ void PID::init(double currentpos){
   _lastOutput = 0;
 }
 
-double PID::compute(double target, double currentpos){
+double PID::compute(double target, double currentpos) {
   unsigned long now = micros();
   double Ts = (double)(now - _lasttime) * 1e-6;
   if(Ts <= 0)return _lastOutput;
@@ -47,8 +47,8 @@ double PID::compute(double target, double currentpos){
   double I = _integral;
 
   _pv = currentpos;
-  double d = _kd * -(_pv - _lastpv) / Ts;
 
+  double d = _kd * -(_pv - _lastpv) / Ts;
   double alpha = Ts / (_tau_f + Ts);
   double D = alpha * d + (1.0 - alpha) * _lastD;
 

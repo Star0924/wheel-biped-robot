@@ -3,6 +3,7 @@
 #include "command.h"
 
 
+
 void setup() {
   Serial.begin(115200);
   while (!Serial && millis() < 3000);
@@ -19,6 +20,7 @@ void setup() {
   // ---- 開機第一件事：4顆關節馬達自鎖 ----
   Serial.println("===== 6馬達雙輪足機器人 初始化 =====");
   lockJoints();
+  disableWheels();
 
   // ---- IMU 初始化 ----
   imu.begin(IMU_SERIAL, IMU_BAUD);
@@ -40,7 +42,7 @@ void loop() {
 
   // ---------- 100Hz 平衡控制迴圈 ----------
   static uint32_t lastControlTime = 0;
-  if (millis() - lastControlTime >= 10) {
+  if (millis() - lastControlTime >= 8) {
     lastControlTime = millis();
 
     const IMUData& imuData = imu.getData();
@@ -51,7 +53,7 @@ void loop() {
     // 然後再計算平均 (注意你原本左輪有加負號)
     Avgspeed = (-leftFiltered + rightFiltered) / 2.0;
 
-    // 1. 取得原始俯仰角
+    // 1. 取得原始俯仰角 角速度
     double rawPitch = imuData.angle[1];
 
     // 2. 第一級：卡爾曼濾波 (消除隨機雜訊)
@@ -86,12 +88,12 @@ void loop() {
     const IMUData& imuData = imu.getData();
     
     // 同時印出角度，方便在 Serial Plotter 觀察波形
-    // Serial.print("raw:");   Serial.print(imuData.angle[1]);
-    // Serial.print(" filtered:"); Serial.print(finalFilteredPitch);
-    // Serial.print(" output:");   Serial.println(motorOutput);
+    Serial.print("raw:");   Serial.print(imuData.angle[1]);
+    Serial.print(" filtered:"); Serial.print(finalFilteredPitch);
+    Serial.print(" output:");   Serial.println(motorOutput);
     Serial.print("current:");   Serial.println(wheelRight.motor_current);
     Serial.print("avgspeed:");   Serial.println(Avgspeed);
-    // Serial.print("targetangle:");   Serial.println(targetangle);
+    Serial.print("targetangle:");   Serial.println(targetangle);
   }
 
   // ---------- 處理序列埠指令 ----------

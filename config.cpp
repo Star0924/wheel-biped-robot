@@ -15,11 +15,11 @@ const char* jointNames[4] = { "左髖", "左膝", "右髖", "右膝" };
 // ================= 系統物件實例化 =================
 HWT906 imu;
 PID CurrentPID(0.1, 0.0, 0.0); // 用於電流控制的 PID
-PID balancePID(41.1, 0.01, 0.15);   
-PID velPID(0.0084, 0.0, 0.0);
+PID balancePID(42.0, 0.01, 0.15);   //42.0 0.01 0.15
+PID velPID(0.018, 0.0015, 0.0); // 0.018 0.0015 0.0
 KalmanFilter kalmanPitch{1.0, 1.0, 0.05}; // R=1.0, P=1.0, Q=0.05
-MovingAverageFilter speedFilterLeft(10); 
-MovingAverageFilter speedFilterRight(10);
+KalmanFilter speedFilterLeft(10); 
+KalmanFilter speedFilterRight(10);
 LowPassFilter lowPassPitch(0.3); // 低通濾波器，alpha=0.3
 
 // ================= 狀態變數初始化 =================

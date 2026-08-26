@@ -103,6 +103,7 @@ void disableWheels() {
   wheelsEnabled = false;
   motorOutput = 0.0;
   targetangle = 0.0;
+  Avgspeed = 0.0;
   Serial.println(">>> 輪子已關閉");
 }
 

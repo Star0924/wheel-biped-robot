@@ -21,7 +21,6 @@ const double FALL_LIMIT_DEG   = 40.0; // 傾倒保護角
 
 
 // ================= 全域物件與變數宣告 (extern) =================
-// 告訴編譯器：這些變數存在，但實體定義在 config.cpp 中
 extern LKMotor wheelLeft;
 extern LKMotor wheelRight;
 extern LKMotor hipLeft;
@@ -38,8 +37,8 @@ extern PID balancePID;
 extern PID velPID;
 extern KalmanFilter kalmanPitch;
 extern LowPassFilter lowPassPitch;
-extern MovingAverageFilter speedFilterLeft;
-extern MovingAverageFilter speedFilterRight;
+extern KalmanFilter speedFilterLeft;
+extern KalmanFilter speedFilterRight;
 
 extern double finalFilteredPitch;
 extern bool wheelsEnabled;
