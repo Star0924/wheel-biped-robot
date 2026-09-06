@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+
+# Python 虛擬環境
+venv/
+.venv/
+
+# Log
+*.log
+
+# Excel 紀錄
+*.xlsx
+*.csv
+
+# 圖片輸出
+*.png
+
+# VSCode
+.vscode/
+
+# Arduino 暫存檔
+build/
+
+# Windows
+Thumbs.db
+Desktop.ini
