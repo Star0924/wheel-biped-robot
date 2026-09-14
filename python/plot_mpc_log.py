@@ -34,6 +34,7 @@ def load_csv(path):
     if not rows:
         raise ValueError(f"{path} 是空的，沒有資料可以畫")
 
+
     data = {
         "seq": np.array([int(r["seq"]) for r in rows]),
         "t_wall_s": np.array([float(r["t_wall_s"]) for r in rows]),
@@ -41,7 +42,7 @@ def load_csv(path):
         "pitch_rate_dps": np.array([float(r["pitch_rate_dps"]) for r in rows]),
         "wheel_speed_dps": np.array([float(r["wheel_speed_dps"]) for r in rows]),
         "v_mps": np.array([float(r["v_mps"]) for r in rows]),
-        "u0_Nm": np.array([float(r["u0_Nm"]) for r in rows]),
+        "u0_Nm": np.array([float(r["u0_Nm_combined"]) for r in rows]),
         "solve_total_ms": np.array([float(r["solve_total_ms"]) for r in rows]),
         "solve_qp_ms": np.array([float(r["solve_qp_ms"]) for r in rows]),
         "dropped": np.array([int(r["dropped"]) for r in rows]),

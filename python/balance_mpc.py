@@ -24,10 +24,10 @@ from dataclasses import dataclass
 # ----------------------------------------------------------------------
 @dataclass
 class RobotParams:
-    m_w: float = 1.582      # 單輪質量 (kg)
-    I_w: float = 0.0128    # 單輪對輪軸轉動慣量 (kg*m^2)
-    m_b: float = 9.015      # 機身等效質量 (kg)
-    I_b: float = 0.287     # 機身對自身質心轉動慣量 (kg*m^2)
+    m_w: float = 3.165     # 單輪質量 (kg)
+    I_w: float = 0.0256    # 單輪對輪軸轉動慣量 (kg*m^2)
+    m_b: float = 7.6      # 機身等效質量 (kg)
+    I_b: float = 0.308     # 機身對自身質心轉動慣量 (kg*m^2)
     r: float = 0.108       # 輪半徑 (m)
     g: float = 9.81       # 重力加速度 (m/s^2)
 
@@ -113,11 +113,11 @@ class BalanceMPC:
         # [p, v, theta, omega]
         # 注意：這個加速版本假設你跟原本一樣「不追蹤絕對位置」(p權重固定0)。
         # 如果之後真的需要動態切換有無追蹤位置，Q[0,0] 也要改成 cp.Parameter。
-        self.Q = np.diag([0.0, 1.0, 50.0, 5.0])
-        self.Qf = self.Q * 10.0
+        self.Q = np.diag([0.0, 35.0, 80.0, 5.0])
+        self.Qf = self.Q * 20.0
 
-        self.R = np.diag([0.2])
-        self.R_delta = np.diag([0.1])
+        self.R = np.diag([0.1])
+        self.R_delta = np.diag([0.75])
 
         self.u_prev = 0.0
 
@@ -190,7 +190,7 @@ class BalanceMPC:
         assert self.prob.is_dpp(), "問題不符合DPP規則，Parameter用法需要檢查"
 
     def solve(self, x0: np.ndarray, l_current: float,
-              v_ref_traj: np.ndarray, p_ref_traj: np.ndarray = None):
+              v_ref_traj: np.ndarray, p_ref_traj: np.ndarray | None = None):
         """
         x0          : 當前狀態量測 [p, v, theta, omega]
         l_current   : 當前腿長量測 (m)。只有跟上次不同(超過1mm)才會觸發重新建模(慢)，
@@ -264,10 +264,10 @@ def run_simulation(sim_steps: int = 500):
         t, p, v, theta, omega, u, v_command
     """
     params = RobotParams()
-    mpc = BalanceMPC(params, N=40, Ts=0.2)
+    mpc = BalanceMPC(params, N=20, Ts=0.2)
 
     x = np.array([0.0, 0.0, 0.01, 0.0])   # 初始狀態：小幅初始傾角擾動
-    l_current = 0.20                       # 假設腿長固定 20cm
+    l_current = 0.181                       # 假設腿長固定 20cm
 
     v_command = 0.0
     v_current_ref = 0.0
@@ -298,7 +298,8 @@ def run_simulation(sim_steps: int = 500):
 
         # ---- 這裡串接下層 VMC：把 u0 (輪扭矩) 與腿部虛擬力一併送給關節馬達 ----
         # tau_hip, tau_knee = vmc.compute(F_leg_ref, l_ref, ...)
-        # tau_wheel = u0
+        # tau_wheel_left  = u0 / 2.0
+        # tau_wheel_right = u0 / 2.0
 
         # ---- 模擬 plant（實機時這段換成 IMU / 編碼器狀態回授）----
         A_c, B_c = continuous_model(params, l_current)
@@ -360,7 +361,7 @@ def plot_history(history: dict, path: str = "mpc_sim_plot.png"):
     # 注意：matplotlib 預設字型 (DejaVu Sans) 不含中文字形，
     # 這裡圖表文字一律用英文，避免存出的 PNG 出現缺字方框。
     t = history["t"]
-    fig, axes = plt.subplots(4, 1, figsize=(9, 10), sharex=True)
+    fig, axes = plt.subplots(5, 1, figsize=(9, 10), sharex=True)
 
     axes[0].plot(t, history["p"], label="p (position, m)")
     axes[0].plot(t, history["v"], label="v (velocity, m/s)")
@@ -381,6 +382,11 @@ def plot_history(history: dict, path: str = "mpc_sim_plot.png"):
     axes[3].set_ylabel("u (N*m)")
     axes[3].set_xlabel("time (s)")
     axes[3].grid(True, alpha=0.3)
+
+    axes[4].plot(t, history["solve_ms"], label="total solve time (ms)")
+    axes[4].set_ylabel("solve time (ms)")
+    axes[4].set_xlabel("time (s)")
+    axes[4].grid(True, alpha=0.3)
 
     fig.suptitle("Balance MPC simulation result")
     fig.tight_layout()

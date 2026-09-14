@@ -28,7 +28,7 @@ from balance_mpc import BalanceMPC, RobotParams
 MPC_PORT = "COM17"          # <<< 改成 SerialUSB1 對應的序列埠名稱
 MPC_BAUD = 2000000         # 需與 Teensy 端 mpcLink.begin() 的 baud 一致
 
-LEG_LENGTH_M = 0.20
+LEG_LENGTH_M = 0.181
 PITCH_SIGN = -1.0
 V_REF = 0.0
 
@@ -41,7 +41,7 @@ PRINT_EVERY = 20
 # 如果均值還是遠高於10ms，可以再往下調(例如15)，
 # 或者乾脆把下面的 MPC_TS 也一併調大，讓模型的時間粒度貼近實測周期。
 MPC_N = 20
-MPC_TS = 0.01
+MPC_TS = 0.015
 
 MPC_OSQP_EPS = 1e-2
 MPC_OSQP_MAX_ITER = 4000
@@ -92,7 +92,8 @@ def main():
         writer = csv.writer(f)
         writer.writerow([
             "seq", "t_wall_s", "t_teensy_ms", "pitch_deg", "pitch_rate_dps",
-            "wheel_speed_dps", "v_mps", "u0_Nm", "solve_total_ms", "solve_qp_ms",
+            "wheel_speed_dps", "v_mps", "u0_Nm_combined",
+            "solve_total_ms", "solve_qp_ms",
             "dropped", "rebuilt", "status",
         ])
 
@@ -159,7 +160,8 @@ def main():
                 if seq % PRINT_EVERY == 0:
                     backlog_note = f"  (剛丟棄{dropped}筆過期資料)" if dropped > 0 else ""
                     print(f"[{seq}] pitch={pitch_deg:+.2f}deg  v={v:+.3f}m/s  "
-                          f"u={u0:+.3f}Nm  solve={timing['total_ms']:.2f}ms "
+                          f"u0(combined)={u0:+.3f}Nm "
+                          f"solve={timing['total_ms']:.2f}ms "
                           f"(qp={timing['qp_ms']:.2f}ms){backlog_note}")
 
                 if timing["rebuilt"]:

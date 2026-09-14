@@ -128,7 +128,7 @@ void enableWheels() {
   double currentPitch = imu.getData().angle[1];
   kalmanPitch.reset(currentPitch);     // 重置卡爾曼濾波器
   lowPassPitch.reset(currentPitch);    // 重置低通濾波器
-  finalFilteredPitch = currentPitch;
+  filteredPitch = currentPitch;
 
   speedFilterLeft.reset(0.0);          // 重置左輪速度濾波器
   speedFilterRight.reset(0.0);         // 重置右輪速度濾波器
@@ -147,6 +147,9 @@ void disableWheels() {
   wheelsEnabled = false;
   motorOutput = 0.0;
   targetangle = 0.0;
+  Avgspeed = 0.0;
+  speedFilterLeft.reset(0.0); speedFilterRight.reset(0.0);
+  wheelLeft.motor_current = 0.0; wheelRight.motor_current = 0.0;
   Serial.println(">>> 輪子已關閉");
 }
 

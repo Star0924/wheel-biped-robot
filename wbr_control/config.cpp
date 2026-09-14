@@ -30,7 +30,8 @@ MovingAverageFilter speedFilterRight(10);
 LowPassFilter lowPassPitch(0.3); // 低通濾波器，alpha=0.3
 
 // ================= 狀態變數初始化 =================
-double finalFilteredPitch = 0.0;
+double filteredPitch = 0.0;
+double filteredPitchRate = 0.0;
 bool wheelsEnabled = false;
 bool jointsLocked  = false;
 double Avgspeed = 0.0;

@@ -32,13 +32,22 @@ const double FALL_LIMIT_DEG   = 40.0; // 傾倒保護角
 // 若之後要壓榨到滿載扭矩，務必先確認散熱/供電沒問題再往上調，且不建議超過8A。
 const double WHEEL_MAX_CURRENT_A = 7.0;
 
+// ================= 扭矩死區補償 =================
+// 保守估計：實測發現扭矩指令太小時，會因為馬達/齒輪箱的靜摩擦而完全不轉，
+// 導致MPC以為有出力、實際上輪子沒動。這裡設一個下限：
+// 只要MPC「想要出力」（指令非零），就把量值墊到至少這個值，
+// 但不會疊加在原本已經夠大的指令上（避免正常指令被過度放大）。
+// 0.3Nm 是先取一個保守值；之後可以實測輪子「剛好開始轉」的臨界扭矩，
+// 再回頭微調這個數字。
+const double DEADZONE_TORQUE_NM = 0.1;
+
 // ================= 控制模式 =================
 enum ControlMode { MODE_PID, MODE_MPC };
 extern ControlMode controlMode;
 
 // ================= MPC (PC端運算) 相關設定 =================
 // 超過這麼久沒收到PC送來的新扭矩指令，視為斷線，自動關閉輪子
-const unsigned long MPC_TIMEOUT_MS = 200;
+const unsigned long MPC_TIMEOUT_MS = 100;
 
 // TODO !! 請務必依馬達實際規格 "實測" 校正扭矩常數，不要只信任規格書標稱值 !!
 // Write_Torque_MultiRound() 收的是電流(A)，MPC 算出來的是扭矩(N*m)，
@@ -74,7 +83,8 @@ extern LowPassFilter lowPassPitch;
 extern MovingAverageFilter speedFilterLeft;
 extern MovingAverageFilter speedFilterRight;
 
-extern double finalFilteredPitch;
+extern double filteredPitch;
+extern double filteredPitchRate;
 extern bool wheelsEnabled;
 extern bool jointsLocked;
 extern double Avgspeed;
