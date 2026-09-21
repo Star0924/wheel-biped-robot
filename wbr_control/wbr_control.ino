@@ -18,25 +18,15 @@ void setup() {
   kneeRight.Serial_Init();
   delay(100);
 
-  // ---- 開機第一件事：4顆關節馬達自鎖 ----
   Serial.println("===== 6馬達雙輪足機器人 初始化 =====");
   lockJoints();
 
-  // ---- IMU 初始化 ----
   imu.begin(IMU_SERIAL, IMU_BAUD);
 
-  // ---- PID 初始化 ----
   balancePID.init(0.0);
   velPID.init(0.0);
   CurrentPID.init(0.0);
 
-  // !! 注意 !!
-  // balancePID 的輸出是「motorOutput」，會直接送進 Write_angularvel_MultiRound()；
-  // 目前這裡只設了 CurrentPID 的輸出限制(-4~4A)，但 CurrentPID 並沒有被接進
-  // 67Hz 控制迴圈 (見 loop() 裡的 PID 模式分支)，所以這個限制實際上完全沒有作用。
-  // 真正在跑的 balancePID / velPID 目前是用 pid.h 裡的預設值 (Outmax/Outmin = ±1000)。
-  // 這個值有沒有對應到你的機構安全轉速上限，請務必確認後再上機測試，
-  // 建議依實際安全轉速呼叫 balancePID.setOutputLimits(...) / velPID.setOutputLimits(...)。
   CurrentPID.setOutputLimits(-4, 4);
   // TODO: balancePID.setOutputLimits(±你的安全轉速上限);
   // TODO: velPID.setOutputLimits(±你允許的俯仰角補償上限);
@@ -52,38 +42,51 @@ void setup() {
 
 void loop() {
   imu.update();
-
-  // MPC 指令是非同步收的，每個 loop() 都要 poll，不要卡在 67Hz 控制區塊裡
   mpcLink.poll();
 
-  updateBalanceControl();  // 67Hz 平衡控制迴圈 (內部自己做15ms節流)
-  printDebugInfo();        // 10Hz 除錯輸出   (內部自己做100ms節流)
+  updateBalanceControl();
+  printDebugInfo();
 
-  handleSerialCommand();   // 處理序列埠指令
+  handleSerialCommand();
 }
 
 // ================================================================
-// 67Hz 平衡控制迴圈
+// 平衡控制迴圈 (CONTROL_PERIOD_MS 節流)
 // ================================================================
 void updateBalanceControl() {
   static uint32_t lastControlTime = 0;
-  if (millis() - lastControlTime < 15) return;
-  lastControlTime = millis();
+  uint32_t now = millis();
+  if (now - lastControlTime < CONTROL_PERIOD_MS) return;
+
+  // 【修改】用真實經過的時間做陀螺儀積分，而不是假設固定 15ms。
+  // loop() 偶爾會被序列埠/馬達通訊拖長，用實際 dt 才不會累積角度誤差。
+  double dt_s = (lastControlTime == 0) ? (CONTROL_PERIOD_MS * 1e-3)
+                                       : (now - lastControlTime) * 1e-3;
+  lastControlTime = now;
 
   if (!wheelsEnabled) return;
+
   // ---- 1. 讀取/濾波輪速 ----
   double leftFiltered  = speedFilterLeft.update(wheelLeft.motor_dspeed);
   double rightFiltered = speedFilterRight.update(wheelRight.motor_dspeed);
-  Avgspeed = (-leftFiltered + rightFiltered) / 2.0;  // 左輪訊號方向與右輪相反，故取負號後平均
+  Avgspeed = (-leftFiltered + rightFiltered) / 2.0;
 
-  // ---- 2. 讀取/濾波俯仰角 ----
+  // ---- 2. 俯仰角與角速度 ----
   const IMUData& imuData = imu.getData();
-  double rawPitch = imuData.angle[1];
-  double kalmanPitchOut = kalmanPitch.update(rawPitch);      // 第一級：卡爾曼濾波，消除隨機雜訊
-  filteredPitch = lowPassPitch.update(kalmanPitchOut);  // 第二級：低通濾波，消除高頻結構震動
-  
+  double rawPitch     = imuData.angle[1];
+  double rawPitchRate = GYRO_PITCH_SIGN * imuData.gyro[1];
+  filteredPitchRate   = rawPitchRate;
 
-  // ---- 3. 跌倒保護 (兩種控制模式都適用) ----
+  if (controlMode == MODE_MPC) {
+    // 【修改】改用陀螺儀輔助估測器，消除原本 Kalman+低通造成的 ~75ms 相位落後，
+    // 讓送給 MPC 的 theta 與 omega 屬於同一瞬間。
+    filteredPitch = pitchEstimator.update(rawPitch, rawPitchRate, dt_s);
+  } else {
+    // 板載 PID 模式維持原本的兩級平滑 (PID 增益是照舊濾波器調出來的，別亂動)
+    filteredPitch = lowPassPitch.update(kalmanPitch.update(rawPitch));
+  }
+
+  // ---- 3. 跌倒保護 ----
   if (fabs(filteredPitch) > FALL_LIMIT_DEG) {
     if (wheelsEnabled) {
       disableWheels();
@@ -94,35 +97,40 @@ void updateBalanceControl() {
 
   // ---- 4. 依控制模式送出馬達指令 ----
   if (controlMode == MODE_MPC) {
-    runMpcControlStep();
+    runMpcControlStep(leftFiltered, rightFiltered);
   } else {
     runOnboardPidControlStep();
   }
 }
 
 // MPC 模式：把狀態送給PC，套用PC回傳的扭矩指令
-void runMpcControlStep() {
-  double pitchRate_dps = imu.getData().gyro[1];   // 直接用IMU角速度，不用對濾波後角度微分
-  mpcLink.sendState(filteredPitch, pitchRate_dps, Avgspeed, millis());
+void runMpcControlStep(double leftSpeed_dps, double rightSpeed_dps) {
+  // 先送狀態，讓 PC 有最長的時間可以算
+  mpcLink.sendState(filteredPitch, filteredPitchRate, Avgspeed, millis());
 
   if (!mpcLink.isFresh(MPC_TIMEOUT_MS)) {
-    // PC斷線或跟不上，安全起見直接關輪子，不要用舊指令硬撐
     disableWheels();
     Serial.println("!!! MPC 連線逾時(PC無回應)，已自動關閉輪子 !!!");
     return;
   }
 
-  double torqueCmd_Nm = mpcLink.lastTorqueCmd() / 2;   //input為兩顆輪胎合力，因此要/2來分給兩顆馬達
-  torqueCmd_Nm = applyTorqueDeadzone(torqueCmd_Nm, DEADZONE_TORQUE_NM);
-  double currentCmd_A = torqueCmd_Nm / MOTOR_TORQUE_CONSTANT;
+  double baseTorque_Nm = mpcLink.lastTorqueCmd() / 2.0;   // 單輪扭矩
 
-  // 注意：wheelLeft / wheelRight 建構時已帶入 WHEEL_MAX_CURRENT_A，
-  // Write_Torque_MultiRound() 內部會自動把電流夾限在安全範圍，
-  // 這裡不需要再手動 clamp 一次。
-  wheelLeft.Write_Torque_MultiRound(WHEEL_LEFT_SIGN * currentCmd_A);
-  wheelRight.Write_Torque_MultiRound(WHEEL_RIGHT_SIGN * currentCmd_A);
+  // 【修改】摩擦前饋取代死區墊高。方向以「該輪實際轉向」為主，
+  // 停止時才平滑過渡到指令方向，零點附近不會跳變。
+  // 注意左輪機械方向與訊號相反(WHEEL_LEFT_SIGN=-1)，所以判斷方向時要先轉成同一個座標。
+  double torqueLeft_Nm  = applyFrictionFF(baseTorque_Nm,
+                                          WHEEL_LEFT_SIGN * leftSpeed_dps,
+                                          FRICTION_LEFT_NM);
+  double torqueRight_Nm = applyFrictionFF(baseTorque_Nm,
+                                          WHEEL_RIGHT_SIGN * rightSpeed_dps,
+                                          FRICTION_RIGHT_NM);
 
-  motorOutput = torqueCmd_Nm * 2; // 借用同一個除錯變數印出來看
+  wheelLeft.Write_Torque_MultiRound(WHEEL_LEFT_SIGN  * torqueLeft_Nm  / MOTOR_TORQUE_CONSTANT);
+  wheelRight.Write_Torque_MultiRound(WHEEL_RIGHT_SIGN * torqueRight_Nm / MOTOR_TORQUE_CONSTANT);
+
+  motorOutput  = baseTorque_Nm * 2.0;                 // MPC 要求的總扭矩
+  torqueOutput = torqueLeft_Nm + torqueRight_Nm;      // 實際送出的總扭矩(含摩擦前饋)
 }
 
 // 板載 PID 模式（原本邏輯，維持不變）
@@ -143,16 +151,31 @@ void printDebugInfo() {
 
   const IMUData& imuData = imu.getData();
 
-  // 同時印出角度，方便在 Serial Plotter 觀察波形
   Serial.print("raw:");       Serial.print(imuData.angle[1]);
-  Serial.print(" filtered:"); Serial.print(filteredPitch);
-  Serial.print(" output:");   Serial.print(motorOutput);
+  Serial.print(" est:");      Serial.print(filteredPitch);
+  Serial.print(" gyroY:");    Serial.print(GYRO_PITCH_SIGN * imuData.gyro[1]);
+  Serial.print(" uReq:");     Serial.print(motorOutput);
+  Serial.print(" uApp:");     Serial.print(torqueOutput);
   Serial.print(" current:");  Serial.print(wheelRight.motor_current);
   Serial.print(" avgspeed:"); Serial.println(Avgspeed);
-  // Serial.print(" input:");    Serial.println(targetangle);
 }
 
-// 死區補償：只要指令非零，扭矩量值至少墊到 deadzone；
+// ================================================================
+// 摩擦前饋：tau_out = u + Fc * dir
+//   speed_dps : 該輪在「與 u 相同座標」下的角速度
+//   dir       : 輪子在轉 -> 取輪速方向；快停下來 -> 平滑過渡到指令方向
+// 兩段都用 tanh() 做連續過渡，整條曲線在 u=0 附近是連續的，
+// 不會像原本的死區墊高那樣產生 ±Fc 的跳變(那正是極限環的來源)。
+// ================================================================
+double applyFrictionFF(double u, double speed_dps, double Fc) {
+  double dirSpeed = tanh(speed_dps / FRICTION_SPEED_EPS_DPS);   // -1 ~ +1
+  double dirCmd   = tanh(u / FRICTION_CMD_EPS_NM);              // -1 ~ +1
+  double w        = fabs(dirSpeed);                             // 輪子越快越信任輪速方向
+  double dir      = w * dirSpeed + (1.0 - w) * dirCmd;
+  return u + Fc * dir;
+}
+
+// 保留舊版死區補償供對照/回退使用（目前未被呼叫）
 double applyTorqueDeadzone(double u, double deadzone) {
   if (fabs(u) < 1e-6) return 0.0;
   if (fabs(u) < deadzone) {
