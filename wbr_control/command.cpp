@@ -1,8 +1,6 @@
 #include "command.h"
 
-// ================================================================
-// 序列埠指令總機：從 loop() 每次呼叫，依收到的字元分派對應動作
-// ================================================================
+// 序列埠指令函式
 void handleSerialCommand() {
   if (Serial.available() <= 0) return;
   char cmd = Serial.read();
@@ -69,14 +67,7 @@ void handleSerialCommand() {
   }
 }
 
-// ================================================================
-// 關節自鎖：把 4 顆關節馬達移動到「固定的預設姿態」並鎖定，
-// 不是鎖定在「目前所在」的角度。
-//
-// 注意：如果之前用 u 解鎖後手動搬動過腿部、離預設姿態很遠，
-// 執行這個指令時關節會以 JOINT_LOCK_SPEED 的速度朝預設角度移動，
-// 請先確認機構周圍淨空，避免夾傷或碰撞。
-// ================================================================
+// 4關節特定角度自鎖
 void lockJoints() {
   Serial.println(">>> 執行關節自鎖 (將移動至固定預設姿態)...");
 
@@ -91,12 +82,11 @@ void lockJoints() {
     delay(5);
   }
 
-  // 實際鎖定用的固定預設姿態 (依機構設計量測得出)
-  jointMotors[0]->Write_Angle_MultiRound(0,   JOINT_LOCK_SPEED);//-45
-  jointMotors[1]->Write_Angle_MultiRound(0,  JOINT_LOCK_SPEED);//70.2
-  jointMotors[2]->Write_Angle_MultiRound(0,    JOINT_LOCK_SPEED);//45
-  jointMotors[3]->Write_Angle_MultiRound(0, JOINT_LOCK_SPEED);//-70.2
-
+  // 設定關節角度(設馬達出軸方向為負)
+  jointMotors[0]->Write_Angle_MultiRound(0,   JOINT_LOCK_SPEED);  //-45     左髖
+  jointMotors[1]->Write_Angle_MultiRound(0,  JOINT_LOCK_SPEED);   //70.2    左膝
+  jointMotors[2]->Write_Angle_MultiRound(0,    JOINT_LOCK_SPEED); //45      右髖
+  jointMotors[3]->Write_Angle_MultiRound(0, JOINT_LOCK_SPEED);    //-70.2   右膝
   jointsLocked = true;
   Serial.println(">>> 關節自鎖完成 (已移動至預設姿態)");
 }
@@ -113,16 +103,14 @@ void unlockJoints() {
   Serial.println(">>> 關節已解鎖，可手動調整腿部姿態，完成後請輸入 l 重新自鎖");
 }
 
-// ================================================================
 // 輪子啟動 / 關閉
-// ================================================================
 void enableWheels() {
   wheelLeft.Write_Motor_Enable();
   wheelRight.Write_Motor_Enable();
 
   balancePID.init(0.0);
   velPID.init(0.0);
-  CurrentPID.init(0.0);
+  // CurrentPID.init(0.0);
 
   // 初始化所有濾波器的狀態，強制設定為當前角度與零速度，避免啟動瞬間輸出暴衝
   double currentPitch = imu.getData().angle[1];
@@ -148,14 +136,15 @@ void disableWheels() {
   motorOutput = 0.0;
   targetangle = 0.0;
   Avgspeed = 0.0;
-  speedFilterLeft.reset(0.0); speedFilterRight.reset(0.0);
-  wheelLeft.motor_current = 0.0; wheelRight.motor_current = 0.0;
+  filteredPitch = 0.0;
+  speedFilterLeft.reset(0.0); 
+  speedFilterRight.reset(0.0);
+  wheelLeft.motor_current = 0.0; 
+  wheelRight.motor_current = 0.0;
   Serial.println(">>> 輪子已關閉");
 }
 
-// ================================================================
 // 除錯輸出
-// ================================================================
 void PrintMotorStatus(LKMotor &motor, const char *name) {
   motor.Read_Motor_Status2();
   Serial.print(name);

@@ -7,17 +7,9 @@
 // 使用 Teensy 第二組 USB 虛擬序列埠 (SerialUSB1)，跟原本用來
 // 下 e/d/l/u 等人工指令的 Serial 完全分開，避免協定字元互相衝突。
 //
-// !! 使用前必須先在 Arduino IDE 設定 !!
-//    Tools -> USB Type -> 選擇 "Dual Serial" 或 "Triple Serial"
-//    這樣才會多出 SerialUSB1 這個埠可用。
-//
 // 通訊格式（皆為 ASCII，換行結尾）：
 //   Teensy -> PC :  S,<millis>,<pitch_deg>,<pitchRate_dps>,<wheelSpeed_dps>\n
 //   PC -> Teensy :  U,<seq>,<torque_Nm>\n
-//
-// 安全設計：poll() 只在收到「格式正確」的完整訊息時才更新 _lastRxMillis，
-// 所以 isFresh() 反映的是「最後一次成功解析」的時間，格式錯誤/斷線都會
-// 讓 isFresh() 判定逾時，讓主控迴圈自動關閉輪子。
 // ============================================================
 
 class MPCLink {
@@ -28,7 +20,6 @@ class MPCLink {
     void sendState(double pitch_deg, double pitchRate_dps,
                    double wheelSpeed_dps, uint32_t timestamp_ms);
 
-    // 建議每次 loop() 都呼叫，非阻塞地解析PC送回的扭矩指令
     // 有收到新的完整指令時回傳 true
     bool poll();
 

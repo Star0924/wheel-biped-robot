@@ -46,7 +46,6 @@ MPC_TIMEOUT_S = 0.3
 PRINT_EVERY = 20
 
 # 實測 solve_total_ms: p50 5.7 / p95 10.3 / max 13.3 (N=20, Ts=0.015)
-# 目前這個組合是跟得上 15ms 控制週期的，先不要再往下砍 N。
 MPC_N = 20
 MPC_TS = 0.015
 

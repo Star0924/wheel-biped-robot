@@ -74,8 +74,9 @@ class RobotParams:
     # 先填 0.7；等你用測力計實測校正 MOTOR_TORQUE_CONSTANT 之後再調回 1.0。
     torque_gain: float = 0.7
 
-    # 致動器與安全限制
+    # input安全限制
     u_max: float = 8.0        # 左右輪合計最大扭矩 (N*m)
+
     # [2nd] 4.0 -> 2.5。log 顯示 |du| 的 p99 已經到 4.10、有 1.31% 的時間打到上限，
     # 代表變化率限制正在「參與」極限環而不是在保護系統。
     # 2.5Nm/step @ 67Hz = 167Nm/s，對搶救傾倒來說依然非常快。

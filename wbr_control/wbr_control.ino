@@ -2,6 +2,12 @@
 #include "config.h"
 #include "command.h"
 
+  // ============== 指令表 ================
+  // 小車   -> e: 啟動輪子平衡  d: 關閉輪子  l: 關節重新自鎖  u: 解鎖關節(可手動搬動腿部)
+  // IMU    -> z: 偏航歸零  x: XY軸歸零  c: 加速度校正  6: 切換至6軸模式  // 9: 切換至9軸模式
+  // 控制器  -> m: 切換 PID(板載) / MPC(PC端) 控制模式 (須先按 d 關閉輪子才能切換)
+  // =====================================
+
 void setup() {
   Serial.begin(115200);
   while (!Serial && millis() < 3000);
@@ -18,26 +24,14 @@ void setup() {
   kneeRight.Serial_Init();
   delay(100);
 
-  Serial.println("===== 6馬達雙輪足機器人 初始化 =====");
+  // ---- 關節馬達自鎖 ----
   lockJoints();
-
   imu.begin(IMU_SERIAL, IMU_BAUD);
 
   balancePID.init(0.0);
   velPID.init(0.0);
-  CurrentPID.init(0.0);
-
-  CurrentPID.setOutputLimits(-4, 4);
-  // TODO: balancePID.setOutputLimits(±你的安全轉速上限);
-  // TODO: velPID.setOutputLimits(±你允許的俯仰角補償上限);
-
-  Serial.println("===== 初始化完成 =====");
-  Serial.println("指令：e=啟動輪子平衡  d=關閉輪子  l=關節重新自鎖  u=解鎖關節(可手動搬動腿部)");
-  Serial.println("      z=偏航歸零  x=XY軸歸零  c=加速度校正  6=切換至6軸模式  9=切換至9軸模式");
-  Serial.println("      m=切換 PID(板載) / MPC(PC端) 控制模式 (須先按 d 關閉輪子才能切換)");
-  Serial.print(">>> 目前控制模式: ");
-  Serial.println(controlMode == MODE_MPC ? "MPC" : "PID");
-  Serial.println(">>> 關節已自鎖，請將車體扶正後輸入 e 啟動輪子開始平衡");
+  // CurrentPID.init(0.0);
+  // CurrentPID.setOutputLimits(-4, 4);
 }
 
 void loop() {
@@ -58,44 +52,41 @@ void updateBalanceControl() {
   uint32_t now = millis();
   if (now - lastControlTime < CONTROL_PERIOD_MS) return;
 
-  // 【修改】用真實經過的時間做陀螺儀積分，而不是假設固定 15ms。
-  // loop() 偶爾會被序列埠/馬達通訊拖長，用實際 dt 才不會累積角度誤差。
-  double dt_s = (lastControlTime == 0) ? (CONTROL_PERIOD_MS * 1e-3)
-                                       : (now - lastControlTime) * 1e-3;
+
+  double dt_s;
+  if (lastControlTime == 0){
+    dt_s = CONTROL_PERIOD_MS * 1e-3;
+  } else{
+    dt_s = (now - lastControlTime) * 1e-3;
+  }
   lastControlTime = now;
 
-  if (!wheelsEnabled) return;
-
-  // ---- 1. 讀取/濾波輪速 ----
+  // 讀取輪速
   double leftFiltered  = speedFilterLeft.update(wheelLeft.motor_dspeed);
   double rightFiltered = speedFilterRight.update(wheelRight.motor_dspeed);
   Avgspeed = (-leftFiltered + rightFiltered) / 2.0;
 
-  // ---- 2. 俯仰角與角速度 ----
+  // 俯仰角與角速度
   const IMUData& imuData = imu.getData();
   double rawPitch     = imuData.angle[1];
   double rawPitchRate = GYRO_PITCH_SIGN * imuData.gyro[1];
   filteredPitchRate   = rawPitchRate;
 
   if (controlMode == MODE_MPC) {
-    // 【修改】改用陀螺儀輔助估測器，消除原本 Kalman+低通造成的 ~75ms 相位落後，
-    // 讓送給 MPC 的 theta 與 omega 屬於同一瞬間。
     filteredPitch = pitchEstimator.update(rawPitch, rawPitchRate, dt_s);
   } else {
-    // 板載 PID 模式維持原本的兩級平滑 (PID 增益是照舊濾波器調出來的，別亂動)
     filteredPitch = lowPassPitch.update(kalmanPitch.update(rawPitch));
   }
 
-  // ---- 3. 跌倒保護 ----
+  if (!wheelsEnabled) return;
+
+  // 跌倒保護
   if (fabs(filteredPitch) > FALL_LIMIT_DEG) {
-    if (wheelsEnabled) {
-      disableWheels();
-      Serial.println("!!! 傾角過大，已自動關閉輪子馬達 !!!");
-    }
+    disableWheels();
     return;
   }
 
-  // ---- 4. 依控制模式送出馬達指令 ----
+  // 依控制模式送出馬達指令
   if (controlMode == MODE_MPC) {
     runMpcControlStep(leftFiltered, rightFiltered);
   } else {
@@ -148,7 +139,6 @@ void printDebugInfo() {
   static uint32_t lastPrintTime = 0;
   if (millis() - lastPrintTime < 100) return;
   lastPrintTime = millis();
-
   const IMUData& imuData = imu.getData();
 
   Serial.print("raw:");       Serial.print(imuData.angle[1]);
@@ -159,6 +149,8 @@ void printDebugInfo() {
   Serial.print(" current:");  Serial.print(wheelRight.motor_current);
   Serial.print(" avgspeed:"); Serial.println(Avgspeed);
 }
+
+
 
 // ================================================================
 // 摩擦前饋：tau_out = u + Fc * dir
@@ -176,10 +168,10 @@ double applyFrictionFF(double u, double speed_dps, double Fc) {
 }
 
 // 保留舊版死區補償供對照/回退使用（目前未被呼叫）
-double applyTorqueDeadzone(double u, double deadzone) {
-  if (fabs(u) < 1e-6) return 0.0;
-  if (fabs(u) < deadzone) {
-    return (u > 0) ? deadzone : -deadzone;
-  }
-  return u;
-}
+// double applyTorqueDeadzone(double u, double deadzone) {
+//   if (fabs(u) < 1e-6) return 0.0;
+//   if (fabs(u) < deadzone) {
+//     return (u > 0) ? deadzone : -deadzone;
+//   }
+//   return u;
+// }
