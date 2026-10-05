@@ -18,7 +18,11 @@ class MPCLink {
 
     // 每個控制週期呼叫一次，把目前狀態送給 PC
     void sendState(double pitch_deg, double pitchRate_dps,
-                   double wheelSpeed_dps, uint32_t timestamp_ms);
+                  double vL_dps, double vR_dps,
+                  double yaw_deg, double yawRate_dps, uint32_t timestamp_ms);
+    double lastTorqueDiff() const { return _lastTorqueDiff; }
+    // private:
+    double _lastTorqueDiff = 0.0;
 
     // 有收到新的完整指令時回傳 true
     bool poll();

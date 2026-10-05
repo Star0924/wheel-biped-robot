@@ -39,6 +39,9 @@ double Avgspeed = 0.0;
 double motorOutput = 0.0;
 double torqueOutput = 0.0;
 double targetangle = 0.0;
+double filteredYaw = 0.0;
+double yawRate = 0.0;
+double yawZeroDeg = 0.0;
 
 // 建立控制模式變數
 ControlMode controlMode = MODE_MPC;  // 預設控制模式：MPC

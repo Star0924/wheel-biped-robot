@@ -113,6 +113,7 @@ void enableWheels() {
   // CurrentPID.init(0.0);
 
   // 初始化所有濾波器的狀態，強制設定為當前角度與零速度，避免啟動瞬間輸出暴衝
+  yawZeroDeg = YAW_ANGLE_SIGN * imu.getData().angle[2];
   double currentPitch = imu.getData().angle[1];
   kalmanPitch.reset(currentPitch);     // 重置卡爾曼濾波器
   lowPassPitch.reset(currentPitch);    // 重置低通濾波器
@@ -124,7 +125,7 @@ void enableWheels() {
   if (controlMode == MODE_MPC) {
     mpcLink.resetWatchdog();           // 避免PC還沒開始送指令就被判定逾時斷線
   }
-
+  
   wheelsEnabled = true;
   Serial.println(">>> 輪子已啟動，開始平衡");
 }

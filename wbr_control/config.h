@@ -23,6 +23,12 @@ const long JOINT_LOCK_SPEED   = 20;     // 自鎖時的移動速度上限(deg/s)
 const double TARGET_ANGLE     = 0.0;    // 目標角度(deg)，MPC模式下由PC端算出，PID模式下由板載PID算出
 const double FALL_LIMIT_DEG   = 30.0;   // 傾倒保護角
 const double WHEEL_MAX_CURRENT_A = 7.5; // 輪胎馬達電流上限(A)
+const double GYRO_YAW_SIGN = +1.0;   // 左轉(逆時針)為正；手轉車體確認方向
+const double YAW_ANGLE_SIGN = +1.0;
+
+extern double filteredYaw;     // 相對啟動時的航向 (deg, -180~180)
+extern double yawRate;         // deg/s
+extern double yawZeroDeg;
 
 // ================= 左輪摩擦前饋設定 ================= 
 const double FRICTION_LEFT_NM   = 0.401 * 0.7;

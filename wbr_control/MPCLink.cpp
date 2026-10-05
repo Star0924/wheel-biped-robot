@@ -10,12 +10,16 @@ void MPCLink::begin(unsigned long baud) {
 }
 
 void MPCLink::sendState(double pitch_deg, double pitchRate_dps,
-                         double wheelSpeed_dps, uint32_t timestamp_ms) {
+                        double vL_dps, double vR_dps,
+                        double yaw_deg, double yawRate_dps, uint32_t timestamp_ms) {
   SerialUSB1.print('S'); SerialUSB1.print(',');
   SerialUSB1.print(timestamp_ms); SerialUSB1.print(',');
-  SerialUSB1.print(pitch_deg, 4); SerialUSB1.print(',');
+  SerialUSB1.print(pitch_deg, 4);     SerialUSB1.print(',');
   SerialUSB1.print(pitchRate_dps, 4); SerialUSB1.print(',');
-  SerialUSB1.println(wheelSpeed_dps, 4);
+  SerialUSB1.print(vL_dps, 4);        SerialUSB1.print(',');
+  SerialUSB1.print(vR_dps, 4);        SerialUSB1.print(',');
+  SerialUSB1.print(yaw_deg, 4);       SerialUSB1.print(',');
+  SerialUSB1.println(yawRate_dps, 4);
 }
 
 bool MPCLink::poll() {
@@ -33,9 +37,11 @@ bool MPCLink::poll() {
         if (token != nullptr) {
           strtoul(token, nullptr, 10);            // seq，目前只用來除錯，先不特別處理
           char* torqueTok = strtok(nullptr, ",");
-          if (torqueTok != nullptr) {
-            _lastTorque   = atof(torqueTok);
-            _lastRxMillis = millis();
+          char* diffTok   = strtok(nullptr, ",");
+          if (torqueTok != nullptr && diffTok != nullptr) {
+            _lastTorque     = atof(torqueTok);
+            _lastTorqueDiff = atof(diffTok);
+            _lastRxMillis   = millis();
             gotNew = true;
           }
         }

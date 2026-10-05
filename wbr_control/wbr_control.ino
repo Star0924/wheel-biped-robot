@@ -68,6 +68,9 @@ void updateBalanceControl() {
 
   // 俯仰角與角速度
   const IMUData& imuData = imu.getData();
+  double rawYaw = YAW_ANGLE_SIGN * imuData.angle[2] - yawZeroDeg;
+  filteredYaw = fmod(rawYaw + 540.0, 360.0) - 180.0;      // wrap 到 -180~180
+  yawRate     = GYRO_YAW_SIGN * imuData.gyro[2];
   double rawPitch     = imuData.angle[1];
   double rawPitchRate = GYRO_PITCH_SIGN * imuData.gyro[1];
   filteredPitchRate   = rawPitchRate;
@@ -96,8 +99,11 @@ void updateBalanceControl() {
 
 // MPC 模式：把狀態送給PC，套用PC回傳的扭矩指令
 void runMpcControlStep(double leftSpeed_dps, double rightSpeed_dps) {
-  // 先送狀態，讓 PC 有最長的時間可以算
-  mpcLink.sendState(filteredPitch, filteredPitchRate, Avgspeed, millis());
+  double vL_fwd = WHEEL_LEFT_SIGN  * leftSpeed_dps;   // 前進為正
+  double vR_fwd = WHEEL_RIGHT_SIGN * rightSpeed_dps;
+
+  mpcLink.sendState(filteredPitch, filteredPitchRate, vL_fwd, vR_fwd,
+                    filteredYaw, yawRate, millis());
 
   if (!mpcLink.isFresh(MPC_TIMEOUT_MS)) {
     disableWheels();
@@ -105,23 +111,19 @@ void runMpcControlStep(double leftSpeed_dps, double rightSpeed_dps) {
     return;
   }
 
-  double baseTorque_Nm = mpcLink.lastTorqueCmd() / 2.0;   // 單輪扭矩
+  double uSum  = mpcLink.lastTorqueCmd();
+  double uDiff = mpcLink.lastTorqueDiff();
+  double baseL = (uSum - uDiff) / 2.0;   // 左輪扭矩(前進為正)
+  double baseR = (uSum + uDiff) / 2.0;
 
-  // 【修改】摩擦前饋取代死區墊高。方向以「該輪實際轉向」為主，
-  // 停止時才平滑過渡到指令方向，零點附近不會跳變。
-  // 注意左輪機械方向與訊號相反(WHEEL_LEFT_SIGN=-1)，所以判斷方向時要先轉成同一個座標。
-  double torqueLeft_Nm  = applyFrictionFF(baseTorque_Nm,
-                                          WHEEL_LEFT_SIGN * leftSpeed_dps,
-                                          FRICTION_LEFT_NM);
-  double torqueRight_Nm = applyFrictionFF(baseTorque_Nm,
-                                          WHEEL_RIGHT_SIGN * rightSpeed_dps,
-                                          FRICTION_RIGHT_NM);
+  double torqueLeft_Nm  = applyFrictionFF(baseL, vL_fwd, FRICTION_LEFT_NM);
+  double torqueRight_Nm = applyFrictionFF(baseR, vR_fwd, FRICTION_RIGHT_NM);
 
   wheelLeft.Write_Torque_MultiRound(WHEEL_LEFT_SIGN  * torqueLeft_Nm  / MOTOR_TORQUE_CONSTANT);
   wheelRight.Write_Torque_MultiRound(WHEEL_RIGHT_SIGN * torqueRight_Nm / MOTOR_TORQUE_CONSTANT);
 
-  motorOutput  = baseTorque_Nm * 2.0;                 // MPC 要求的總扭矩
-  torqueOutput = torqueLeft_Nm + torqueRight_Nm;      // 實際送出的總扭矩(含摩擦前饋)
+  motorOutput  = uSum;
+  torqueOutput = torqueLeft_Nm + torqueRight_Nm;
 }
 
 // 板載 PID 模式（原本邏輯，維持不變）
@@ -143,6 +145,7 @@ void printDebugInfo() {
 
   Serial.print("raw:");       Serial.print(imuData.angle[1]);
   Serial.print(" est:");      Serial.print(filteredPitch);
+  Serial.print(" yaw:");      Serial.print(filteredYaw);
   Serial.print(" gyroY:");    Serial.print(GYRO_PITCH_SIGN * imuData.gyro[1]);
   Serial.print(" uReq:");     Serial.print(motorOutput);
   Serial.print(" uApp:");     Serial.print(torqueOutput);
