@@ -101,15 +101,25 @@ class BalanceMPC:
         self.u_prev = np.zeros(2)
         self.solve_times, self.qp_solve_times = [], []
         self.rebuild_count = 0
+        self.model_updates = 0
         self._l_current = None
         self._build_problem(l_nominal)
 
-    def _build_problem(self, l):
-        p, N, nx, nu = self.p, self.N, self.nx, self.nu
-        A_c, B_c = continuous_model(p, l)
+    def _update_model(self, l):
+        """只重算並寫入 A_d/B_d 的『數值』，不重建 cvxpy 問題 (變高度時每拍都可呼叫)。"""
+        A_c, B_c = continuous_model(self.p, l)
         A_d, B_d = discretize(A_c, B_c, self.Ts)
         self.A_c, self.B_c, self.A_d, self.B_d = A_c, B_c, A_d, B_d
+        self.A_param.value = A_d
+        self.B_param.value = B_d
         self._l_current = l
+
+    def _build_problem(self, l):
+        p, N, nx, nu = self.p, self.N, self.nx, self.nu
+        # [HEIGHT] 動態矩陣改成 Parameter：擺長 l 隨腿長改變時不用重建問題 (DPP 允許 param @ var)
+        self.A_param = cp.Parameter((nx, nx))
+        self.B_param = cp.Parameter((nx, nu))
+        self._update_model(l)
 
         self.X = cp.Variable((nx, N + 1))
         self.U = cp.Variable((nu, N))
@@ -134,7 +144,7 @@ class BalanceMPC:
                 cost += cp.quad_form(self.U[:, k] - self.U[:, k - 1], self.R_delta)
                 cons += [cp.abs(self.U[:, k] - self.U[:, k - 1]) <= self.du_vec]
 
-            cons += [self.X[:, k + 1] == A_d @ self.X[:, k] + B_d @ self.U[:, k]]
+            cons += [self.X[:, k + 1] == self.A_param @ self.X[:, k] + self.B_param @ self.U[:, k]]
             cons += [cp.abs(self.U[0, k]) + cp.abs(self.U[1, k]) <= p.u_max]
             if k >= 1:
                 cons += [cp.abs(self.X[2, k]) <= p.theta_max]
@@ -159,11 +169,10 @@ class BalanceMPC:
     def solve(self, x0, l_current, v_ref_traj, p_ref_traj=None,
               psid_ref_traj=None, delay_s=0.0):
         t_start = time.perf_counter()
-        rebuilt = False
-        if self._l_current is None or abs(l_current - self._l_current) > 1e-3:
-            self._build_problem(l_current)
-            self.rebuild_count += 1
-            rebuilt = True
+        rebuilt = False          # [HEIGHT] 不再重建問題，只更新模型數值
+        if abs(l_current - self._l_current) > 1e-4:
+            self._update_model(l_current)
+            self.model_updates += 1
 
         x0_pred = self._predict_delay(x0, delay_s)
         self.x0_param.value = np.asarray(x0_pred, float)

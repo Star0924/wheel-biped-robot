@@ -46,6 +46,17 @@ bool MPCLink::poll() {
           }
         }
       }
+      // 期望格式: J,<seq>,<dq1_deg>,<dq2_deg>
+      else if (_rxLen > 2 && _rxBuf[0] == 'J' && _rxBuf[1] == ',') {
+        char* seqTok = strtok(_rxBuf + 2, ",");
+        char* q1Tok  = strtok(nullptr, ",");
+        char* q2Tok  = strtok(nullptr, ",");
+        if (seqTok != nullptr && q1Tok != nullptr && q2Tok != nullptr) {
+          _dq1 = atof(q1Tok);
+          _dq2 = atof(q2Tok);
+          _jointNew = true;
+        }
+      }
       _rxLen = 0;
 
     } else if (c != '\r') {

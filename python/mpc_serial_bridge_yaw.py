@@ -33,6 +33,12 @@ import numpy as np
 import serial
 
 from balance_mpc_yaw import BalanceMPC, RobotParams
+from com_balance import LegBalanceModel
+
+try:
+    import msvcrt            # Windows 非阻塞讀鍵 (w/s 調高度)
+except ImportError:
+    msvcrt = None
 
 # ================= 使用者需要確認/調整的設定 =================
 MPC_PORT = "COM6"          # <<< 改成 SerialUSB1 對應的序列埠名稱
@@ -74,6 +80,18 @@ OMEGA_LPF_ALPHA = 1.0
 #   注意：位置是用輪速積分出來的，打滑會累積誤差，開了之後請留意有沒有緩慢跑掉。
 TRACK_POSITION = True    # [3rd] 打開：v3 的殘留誤差已經幾乎都是位置游走
 POS_LIMIT_M = 0.5        # [3rd] 積分位置夾限 (m)
+
+# [HEIGHT] 腿部高度控制 ------------------------------------------------
+#   HEIGHT_CONTROL=True：MPC 追蹤 theta_tilde = theta_imu - theta_eq(q)，且擺長 l 取自 COM 模型。
+#   False：維持舊行為 (theta_eq=0、l=LEG_LENGTH_M、不送 J 封包)。
+#   按鍵 (在這個 console 視窗)：w = 升高, s = 降低, r = 回自鎖高度, q = 停止調整。
+HEIGHT_CONTROL = True
+H_HOME_M       = 0.17     # Hip 在『Teensy 自鎖姿態』時的高度 (m)，需實測；Q_HOME 由 IK 推出
+HEIGHT_STEP_M  = 0.001     # 每按一下 w/s 改變的目標高度
+HEIGHT_RATE_MPS = 0.03    # 高度變化斜率上限 (m/s)；腿動時 COM 會移動，先用慢的
+JOINT_SEND_PERIOD_S = 0.03
+THETA_EQ_SIGN  = +1.0     # theta_eq 與 MPC 的 theta 同向才對；若升降時 pitch 往錯邊跑就改 -1
+LEG = LegBalanceModel()   # 幾何/質量在 com_balance.py 內改成實測值
 
 # [YAW] 偏航控制設定
 YAW_RATE_REF = 0.0          # rad/s，左轉為正；之後可由鍵盤/搖桿改這個值
@@ -133,6 +151,17 @@ def main():
     print(f"[bridge] 暖機完成 (耗時 {warmup_t['total_ms']:.1f}ms)")
     mpc.set_applied_u(0.0, 0.0)
 
+    # [HEIGHT] 高度狀態
+    home = LEG.at_height(H_HOME_M)
+    q1_home, q2_home = home["q1"], home["q2"]
+    h_target = h_cmd = LEG.clamp_h(H_HOME_M)
+    last_h_time = time.time()
+    last_j_time = 0.0
+    sent_dq = None
+    print(f"[bridge] 高度控制={'ON' if HEIGHT_CONTROL else 'OFF'}  "
+          f"Hip 高度範圍 {LEG.h_min:.2f}~{LEG.h_max:.2f} m  自鎖高度 {H_HOME_M:.3f} m  "
+          f"theta_eq={home['theta_eq_deg']:+.2f}deg  l_com={home['l_com']:.3f}m")
+
     seq = 0
     last_rx_time = time.time()
     warned_timeout = False
@@ -151,6 +180,7 @@ def main():
             "seq", "t_wall_s", "t_teensy_ms", "pitch_deg", "pitch_rate_dps",
             "vL_dps", "vR_dps", "v_mps", "pos_m", "yaw_deg", "yaw_rate_dps", "psi_err_rad",
             "u_s", "u_d", "u_s_applied", "u_d_applied",
+            "h_hip_m", "theta_eq_deg", "l_com_m",
             "delay_ms", "solve_total_ms", "solve_qp_ms",
             "dropped", "rebuilt", "status",
         ])
@@ -158,6 +188,16 @@ def main():
         print("[bridge] 開始運行，Ctrl+C 結束")
         try:
             while True:
+                # [HEIGHT] 鍵盤
+                if HEIGHT_CONTROL and msvcrt is not None:
+                    while msvcrt.kbhit():
+                        k = msvcrt.getwch().lower()
+                        if k == 'w':   h_target = LEG.clamp_h(h_target + HEIGHT_STEP_M)
+                        elif k == 's': h_target = LEG.clamp_h(h_target - HEIGHT_STEP_M)
+                        elif k == 'r': h_target = LEG.clamp_h(H_HOME_M)
+                        elif k == 'q': h_target = h_cmd
+                        print(f"[bridge] 目標高度 {h_target:.3f} m")
+
                 parsed = None
                 dropped = 0
                 raw = ser.readline().decode("ascii", errors="ignore")
@@ -185,7 +225,20 @@ def main():
                 t_ms, pitch_deg, pitch_rate_dps, vL_dps, vR_dps, yaw_deg, yaw_rate_dps = parsed
                 wheel_speed_dps = 0.5 * (vL_dps + vR_dps)
 
-                theta = np.radians(pitch_deg) * PITCH_SIGN
+                # [HEIGHT] 高度斜率 -> IK -> COM -> theta_eq / l_com
+                now_h = time.time()
+                if HEIGHT_CONTROL:
+                    max_step = HEIGHT_RATE_MPS * min(now_h - last_h_time, 0.1)
+                    h_cmd += max(-max_step, min(max_step, h_target - h_cmd))
+                    st = LEG.at_height(h_cmd)
+                    theta_eq = THETA_EQ_SIGN * st["theta_eq_rad"]
+                    l_com = st["l_com"]
+                else:
+                    st, theta_eq, l_com = None, 0.0, LEG_LENGTH_M
+                last_h_time = now_h
+
+                # MPC 追蹤 theta_tilde = theta_imu - theta_eq = 0
+                theta = np.radians(pitch_deg) * PITCH_SIGN - theta_eq
                 omega_raw = np.radians(pitch_rate_dps) * PITCH_SIGN
                 v = np.radians(wheel_speed_dps) * wheel_radius_m
 
@@ -228,7 +281,7 @@ def main():
                 delay_s = min(DELAY_CAP_S,
                               last_solve_s + FIXED_LINK_DELAY_S + backlog_s)
 
-                u0, _debug, timing = mpc.solve(x0, LEG_LENGTH_M, v_ref_traj,
+                u0, _debug, timing = mpc.solve(x0, l_com, v_ref_traj,
                                                psid_ref_traj=psid_ref_traj,
                                                delay_s=delay_s)
                 u_s, u_d = float(u0[0]), float(u0[1])
@@ -236,6 +289,14 @@ def main():
 
                 seq += 1
                 ser.write(f"U,{seq},{u_s:.4f},{u_d:.4f}\n".encode("ascii"))
+
+                # [HEIGHT] 腿部關節指令 (相對自鎖姿態的 q1/q2 增量，deg)，變化時才送、最多 30ms 一次
+                if HEIGHT_CONTROL and st is not None:
+                    dq = (math.degrees(st["q1"] - q1_home), math.degrees(st["q2"] - q2_home))
+                    changed = sent_dq is None or max(abs(dq[0] - sent_dq[0]), abs(dq[1] - sent_dq[1])) > 0.05
+                    if changed and (now_h - last_j_time) >= JOINT_SEND_PERIOD_S:
+                        ser.write(f"J,{seq},{dq[0]:.3f},{dq[1]:.3f}\n".encode("ascii"))
+                        sent_dq, last_j_time = dq, now_h
 
                 # [FIX-C] 把「實際會被送出的扭矩」回寫給 MPC 當作下一拍的 u_prev
                 u_s_app, u_d_app = estimate_applied(u_s, u_d, vL_dps, vR_dps)
@@ -258,6 +319,9 @@ def main():
                     f"{u_d:.5f}",
                     f"{u_s_app:.5f}",
                     f"{u_d_app:.5f}",
+                    f"{h_cmd:.4f}",
+                    f"{math.degrees(theta_eq):.4f}",
+                    f"{l_com:.4f}",
                     f"{delay_s * 1000:.2f}",
                     f"{timing['total_ms']:.3f}",
                     f"{timing['qp_ms']:.3f}",
@@ -271,7 +335,7 @@ def main():
                 if seq % PRINT_EVERY == 0:
                     note = f"  (丟棄{dropped}筆過期資料)" if dropped > 0 else ""
                     print(f"[{seq}] pitch={pitch_deg:+.2f}deg  v={v:+.3f}m/s  "
-                          f"us={u_s:+.3f} ud={u_d:+.3f}Nm  yawerr={math.degrees(psi_err):+.1f}deg  delay={delay_s*1000:.0f}ms  "
+                          f"us={u_s:+.3f} ud={u_d:+.3f}Nm  yawerr={math.degrees(psi_err):+.1f}deg  h={h_cmd:.3f}m th_eq={math.degrees(theta_eq):+.2f}  delay={delay_s*1000:.0f}ms  "
                           f"solve={timing['total_ms']:.2f}ms{note}")
 
                 if timing["rebuilt"]:

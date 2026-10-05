@@ -79,6 +79,8 @@ def load_csv(path):
         "u_s": col("u_s"),
         "u_d": col("u_d"),
         "u_s_app": col("u_s_applied"),
+        "h_hip": col("h_hip_m"),
+        "theta_eq_deg": col("theta_eq_deg"),
         "u_d_app": col("u_d_applied"),
     }
     # ---- 舊版 log 相容：單一輪速、單一 u ----
@@ -112,7 +114,8 @@ def plot(d, out_path):
     import matplotlib.pyplot as plt
 
     t = d["t"]
-    n_panels = 9 if d["has_yaw"] else 5
+    has_h = d.get("h_hip") is not None
+    n_panels = (9 if d["has_yaw"] else 5) + (1 if has_h else 0)
     fig, axes = plt.subplots(n_panels, 1, figsize=(11, 2.3 * n_panels + 1), sharex=True)
     i = 0
 
@@ -170,6 +173,17 @@ def plot(d, out_path):
         ax.axhline(U_MAX / 2, color="red", linestyle=":", linewidth=0.8)
         ax.axhline(-U_MAX / 2, color="red", linestyle=":", linewidth=0.8, label="per-wheel limit")
         ax.set_ylabel("per-wheel u (N*m)"); ax.legend(loc="upper left", fontsize=8); ax.grid(True, alpha=0.3)
+        i += 1
+
+    if has_h:
+        ax = axes[i]
+        ax.plot(t, d["h_hip"], color="tab:blue", label="hip height (m)")
+        ax.set_ylabel("hip height (m)")
+        axb = ax.twinx()
+        axb.plot(t, d["theta_eq_deg"], color="tab:red", alpha=0.7, label="theta_eq (deg)")
+        axb.set_ylabel("theta_eq (deg)")
+        ax.legend(loc="upper left", fontsize=8); axb.legend(loc="upper right", fontsize=8)
+        ax.grid(True, alpha=0.3)
         i += 1
 
     # 7. 求解時間
