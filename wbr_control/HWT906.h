@@ -37,6 +37,10 @@ class HWT906_Parser {
   public:
     IMUData data;
 
+    // 每解出一個完整幀就呼叫一次 (type = 0x51 acc / 0x52 gyro / 0x53 angle)
+    typedef void (*FrameCallback)(uint8_t type, const IMUData& d);
+    FrameCallback onFrame = nullptr;
+
     HWT906_Parser();
 
     bool parseByte(uint8_t b);  // 每收到一個byte就餵進來；解出完整一幀時回傳true
@@ -65,6 +69,7 @@ class HWT906 {
     void begin(HardwareSerial &serialPort, uint32_t baud);
 
     bool update();                     // 每個loop()呼叫一次，把序列埠收到的byte都餵給parser
+    void setFrameCallback(HWT906_Parser::FrameCallback cb) { parser.onFrame = cb; }
     const IMUData& getData() const;
 
     // ==== 控制與校正命令 API (皆為阻塞式，內含 delay) ====

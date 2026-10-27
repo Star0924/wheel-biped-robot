@@ -15,7 +15,7 @@ public:
         initialized = false;
     }
 
-    // measuredAngle_deg : IMU 輸出的俯仰角 (deg)
+    // measuredAngle_deg : IMU 輸出的角 (deg)
     // gyroRate_dps      : 同一軸的角速度 (deg/s)，符號必須與角度一致
     // dt_s              : 距離上次呼叫的時間 (s)
     double update(double measuredAngle_deg, double gyroRate_dps, double dt_s) {

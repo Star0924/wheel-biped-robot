@@ -43,6 +43,7 @@ bool HWT906_Parser::parseByte(uint8_t b) {
         state = State::WAIT_HEADER;
         if (verifyChecksum()) {
           decode();
+          if (onFrame) onFrame(buffer[1], data);
           return true;
         }
       }

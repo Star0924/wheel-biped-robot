@@ -59,6 +59,7 @@ class LKMotor
     double motor_current = 0.0;     // 馬達實際回授轉矩電流 (A)
     double motor_temperature = 0;   // 馬達溫度 (°C)
     double motor_dspeed = 0.0;      // 馬達轉速 (deg/s，輸出軸)
+    uint32_t status_rx_count = 0;   // 成功解出(且checksum正確)的狀態回覆累計數；用來判斷 current/speed 是不是新資料
 
   private:
     Stream* MOTOR_SERIAL = &Serial1;

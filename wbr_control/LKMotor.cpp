@@ -294,6 +294,8 @@ void LKMotor::parseStatus2(){
     if (motor_id != _id)
         return;
 
+    status_rx_count++;
+
     motor_temperature = readin[5];
 
     int16_t current = ((int16_t)readin[7] << 8) | readin[6];

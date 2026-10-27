@@ -11,7 +11,8 @@ void MPCLink::begin(unsigned long baud) {
 
 void MPCLink::sendState(double pitch_deg, double pitchRate_dps,
                         double vL_dps, double vR_dps,
-                        double yaw_deg, double yawRate_dps, uint32_t timestamp_ms) {
+                        double yaw_deg, double yawRate_dps, uint32_t timestamp_ms,
+                        const MotorTelemetry* motor) {
   SerialUSB1.print('S'); SerialUSB1.print(',');
   SerialUSB1.print(timestamp_ms); SerialUSB1.print(',');
   SerialUSB1.print(pitch_deg, 4);     SerialUSB1.print(',');
@@ -19,7 +20,18 @@ void MPCLink::sendState(double pitch_deg, double pitchRate_dps,
   SerialUSB1.print(vL_dps, 4);        SerialUSB1.print(',');
   SerialUSB1.print(vR_dps, 4);        SerialUSB1.print(',');
   SerialUSB1.print(yaw_deg, 4);       SerialUSB1.print(',');
-  SerialUSB1.println(yawRate_dps, 4);
+  if (motor == nullptr) {
+    SerialUSB1.println(yawRate_dps, 4);
+    return;
+  }
+  SerialUSB1.print(yawRate_dps, 4);      SerialUSB1.print(',');
+  SerialUSB1.print(motor->iL_A, 3);      SerialUSB1.print(',');
+  SerialUSB1.print(motor->iR_A, 3);      SerialUSB1.print(',');
+  SerialUSB1.print(motor->cmdL_A, 3);    SerialUSB1.print(',');
+  SerialUSB1.print(motor->cmdR_A, 3);    SerialUSB1.print(',');
+  SerialUSB1.print(motor->wL_dps, 3);    SerialUSB1.print(',');
+  SerialUSB1.print(motor->wR_dps, 3);    SerialUSB1.print(',');
+  SerialUSB1.println((int)motor->fresh);
 }
 
 bool MPCLink::poll() {
@@ -31,30 +43,27 @@ bool MPCLink::poll() {
     if (c == '\n') {
       _rxBuf[_rxLen] = '\0';
 
-      // 期望格式: U,<seq>,<torque_Nm>
+      // 期望格式: U,<seq>,<u_l_Nm>,<u_r_Nm>
       if (_rxLen > 2 && _rxBuf[0] == 'U' && _rxBuf[1] == ',') {
         char* token = strtok(_rxBuf + 2, ",");   // 跳過 "U,"
         if (token != nullptr) {
           strtoul(token, nullptr, 10);            // seq，目前只用來除錯，先不特別處理
-          char* torqueTok = strtok(nullptr, ",");
-          char* diffTok   = strtok(nullptr, ",");
-          if (torqueTok != nullptr && diffTok != nullptr) {
-            _lastTorque     = atof(torqueTok);
-            _lastTorqueDiff = atof(diffTok);
+          char* lTok = strtok(nullptr, ",");
+          char* rTok = strtok(nullptr, ",");
+          if (lTok != nullptr && rTok != nullptr) {
+            _lastTorqueL    = atof(lTok);
+            _lastTorqueR    = atof(rTok);
             _lastRxMillis   = millis();
             gotNew = true;
           }
         }
       }
-      // 期望格式: J,<seq>,<dq1_deg>,<dq2_deg>
-      else if (_rxLen > 2 && _rxBuf[0] == 'J' && _rxBuf[1] == ',') {
+      // 期望格式: C,<seq>,<cmd>   (操作指令：e/d/l/u/z/x/c/6/9)
+      else if (_rxLen > 3 && _rxBuf[0] == 'C' && _rxBuf[1] == ',') {
         char* seqTok = strtok(_rxBuf + 2, ",");
-        char* q1Tok  = strtok(nullptr, ",");
-        char* q2Tok  = strtok(nullptr, ",");
-        if (seqTok != nullptr && q1Tok != nullptr && q2Tok != nullptr) {
-          _dq1 = atof(q1Tok);
-          _dq2 = atof(q2Tok);
-          _jointNew = true;
+        char* cmdTok = strtok(nullptr, ",");
+        if (seqTok != nullptr && cmdTok != nullptr && cmdTok[0] != '\0') {
+          pushCommand(cmdTok[0]);
         }
       }
       _rxLen = 0;
@@ -69,4 +78,10 @@ bool MPCLink::poll() {
   }
 
   return gotNew;
+}
+
+void MPCLink::sendAck(char cmd, int result) {
+  SerialUSB1.print('A'); SerialUSB1.print(',');
+  SerialUSB1.print(cmd); SerialUSB1.print(',');
+  SerialUSB1.println(result);
 }
