@@ -30,7 +30,7 @@ V_REF = 0.0
 MPC_TIMEOUT_S = 0.3
 PRINT_EVERY = 20
 
-MPC_N = 30                 # 預測 150ms，兼顧穩定裕度與極速求解 (~0.25ms)
+MPC_N = 10                 # 預測 150ms，兼顧穩定裕度與極速求解 (~0.25ms)
 MPC_TS = 0.01
 
 FIXED_LINK_DELAY_S = 0.024 # 狀態取樣齡 + USB + 馬達電流響應；log 顯示 cmd->電流約 1~2 拍，原 18ms 偏小

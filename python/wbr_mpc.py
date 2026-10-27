@@ -1,5 +1,8 @@
 """
-wbr_mpc.py (實車辨識增益版)
+wbr_mpc.py (實車辨識增益版，CVXPY 寫法)
+
+QP 以 CVXPY 依數學式直接寫出 (見 _build_problem)，底層仍用 OSQP 求解，
+每拍只更新 cp.Parameter，不重新建模。需要 cvxpy >= 1.3 與 osqp。
 
 與前一版相比的關鍵修正：
   1. [根因] 俯仰輸入增益：由 log 辨識，實車「扭矩 -> 俯仰角加速度」約為教科書模型的 2.9 倍
@@ -13,7 +16,7 @@ import time
 from collections import deque
 import numpy as np
 import scipy.sparse as sp
-import osqp
+import cvxpy as cp
 from dataclasses import dataclass
 from scipy.linalg import expm, solve_discrete_are
 
@@ -128,67 +131,86 @@ class BalanceMPC:
             self.K_lqr = None
             return 2.0 * self.Q
 
-    # ------------------------------------------------------------ QP 建構
+    # ------------------------------------------------------------ QP 建構 (CVXPY)
     def _build_problem(self, l):
+        """
+        把 MPC 直接照數學式寫出來，CVXPY 負責轉成 OSQP 的 P, A, l, u。
+        每拍會變的量 (x0, u_prev, 參考軌跡) 宣告成 cp.Parameter，
+        問題只在腿長 l 改變時重建一次；之後每拍只更新參數 (DPP)，OSQP 沿用同一份分解並暖啟動。
+        """
         p, N, nx, nu = self.p, self.N, self.nx, self.nu
         self._update_model(l)
         Pm = self._compute_terminal()
-        self.nz = N * (nx + nu)
-        ix = lambda k: slice((k - 1) * nx, k * nx)
-        iu = lambda k: slice(N * nx + k * nu, N * nx + (k + 1) * nu)
-
-        P = sp.lil_matrix((self.nz, self.nz))
-        for k in range(1, N):
-            P[ix(k), ix(k)] = 2.0 * self.Q
-        P[ix(N), ix(N)] = 2.0 * Pm
-        for k in range(N):
-            P[iu(k), iu(k)] = P[iu(k), iu(k)] + 2.0 * self.R + 2.0 * self.R_delta
-            if k >= 1:
-                P[iu(k - 1), iu(k - 1)] = P[iu(k - 1), iu(k - 1)] + 2.0 * self.R_delta
-                P[iu(k), iu(k - 1)] = -2.0 * self.R_delta
-                P[iu(k - 1), iu(k)] = -2.0 * self.R_delta
-        self.P = sp.csc_matrix(P)
         self.Pm = Pm
+        A, B = self.A_d, self.B_d
+        Q, R, Rd = self.Q, self.R, self.R_delta
 
-        n_dyn, n_rate = N * nx, N * nu
-        A_dyn = sp.lil_matrix((n_dyn, self.nz))
+        # 每拍更新的參數
+        self.x0_par = cp.Parameter(nx, name="x0")             # 延遲補償後的初始狀態
+        self.u_prev_par = cp.Parameter(nu, name="u_prev")     # 上一拍送出的指令
+        self.x_ref_par = cp.Parameter((nx, N), name="x_ref")  # 參考軌跡 (欄 k 對應 x_k)
+
+        # 決策變數
+        x = cp.Variable((nx, N + 1), name="x")
+        u = cp.Variable((nu, N), name="u")
+        self._x_var, self._u_var = x, u
+
+        # 追蹤代價 (x - r)' W (x - r) 展開成 x'Wx - 2 r'W x (常數項不影響最佳解)。
+        # 不直接寫 cp.quad_form(x - r, W)：參數 r 放在 quad_form 裡不符合 DPP，CVXPY 會每拍重新編譯。
+        def track(v, r, W):
+            return cp.quad_form(v, W) - 2 * (r @ W) @ v
+
+        cost = 0
+        constraints = [x[:, 0] == self.x0_par]                # 初始條件
+
         for k in range(N):
-            r0 = k * nx
-            A_dyn[r0:r0 + nx, ix(k + 1)] = np.eye(nx)
-            if k >= 1:
-                A_dyn[r0:r0 + nx, ix(k)] = -self.A_d
-            A_dyn[r0:r0 + nx, iu(k)] = -self.B_d
+            # 代價：輸入大小 + 輸入變化量 (du_0 = u_0 - u_prev)
+            cost += cp.quad_form(u[:, k], R)
+            if k == 0:
+                du = u[:, 0] - self.u_prev_par
+                cost += track(u[:, 0], self.u_prev_par, Rd)
+            else:
+                du = u[:, k] - u[:, k - 1]
+                cost += cp.quad_form(du, Rd)
 
-        A_rate = sp.lil_matrix((n_rate, self.nz))
-        for k in range(N):
-            r0 = k * nu
-            A_rate[r0:r0 + nu, iu(k)] = np.eye(nu)
-            if k >= 1:
-                A_rate[r0:r0 + nu, iu(k - 1)] = -np.eye(nu)
+            # 動態
+            constraints += [x[:, k + 1] == A @ x[:, k] + B @ u[:, k]]
 
-        A_box = sp.eye(self.nz, format="lil")
-        A = sp.vstack([A_dyn, A_rate, A_box], format="csc")
+            # 輸入限幅與變化率限幅
+            constraints += [-p.u_max <= u[:, k], u[:, k] <= p.u_max,
+                            -self.du_vec <= du, du <= self.du_vec]
 
-        lo = np.full(self.nz, -np.inf)
-        hi = np.full(self.nz, np.inf)
         for k in range(1, N):
-            lo[(k - 1) * nx + 2] = -p.theta_max
-            hi[(k - 1) * nx + 2] = p.theta_max
-        lo[N * nx:] = -p.u_max
-        hi[N * nx:] = p.u_max
-        self._box_lo, self._box_hi = lo, hi
+            # 狀態追蹤代價 (x_1 .. x_{N-1}) 與俯仰角限幅
+            cost += track(x[:, k], self.x_ref_par[:, k], Q)
+            constraints += [-p.theta_max <= x[2, k], x[2, k] <= p.theta_max]
 
-        self._n_dyn, self._n_rate = n_dyn, n_rate
-        self._ix, self._iu = ix, iu
-        self._lo = np.concatenate([np.zeros(n_dyn), np.zeros(n_rate), lo])
-        self._hi = np.concatenate([np.zeros(n_dyn), np.zeros(n_rate), hi])
+        # 終端代價 (與原版相同，終端參考取 x_ref 最後一欄)
+        cost += track(x[:, N], self.x_ref_par[:, N - 1], 0.5 * (Pm + Pm.T))
 
-        self.solver = osqp.OSQP()
-        self.solver.setup(P=self.P, q=np.zeros(self.nz), A=A, l=self._lo, u=self._hi,
-                          eps_abs=OSQP_EPS, eps_rel=OSQP_EPS, max_iter=OSQP_MAX_ITER,
-                          polishing=False, adaptive_rho=True, check_termination=5,
-                          warm_starting=True, verbose=False)
-        self._z_last = np.zeros(self.nz)
+        self.problem = cp.Problem(cp.Minimize(cost), constraints)
+        assert self.problem.is_dpp()
+        self.nz = N * (nx + nu)
+        self._needs_cold_start = True
+
+    def _solve_qp(self):
+        """呼叫 OSQP；回傳 (是否可用, 狀態字串, 迭代數)"""
+        if self._needs_cold_start:
+            self.problem._solver_cache.clear()     # 丟掉舊的暖啟動，下次重新 setup
+            self._needs_cold_start = False
+        try:
+            self.problem.solve(solver=cp.OSQP, warm_start=True,
+                               eps_abs=OSQP_EPS, eps_rel=OSQP_EPS, max_iter=OSQP_MAX_ITER,
+                               polishing=False, adaptive_rho=True, check_termination=5,
+                               verbose=False)
+        except cp.error.SolverError as e:
+            return False, f"solver_error: {e}", 0
+        info = self.problem.solver_stats.extra_stats.info
+        status = self.problem.status
+        ok = (self._u_var.value is not None and np.all(np.isfinite(self._u_var.value))
+              and (status in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE)
+                   or (status == cp.USER_LIMIT and info.prim_res < 5e-2)))  # 迭代用盡但殘差夠小 -> 仍可用
+        return ok, info.status, info.iter
 
     # ------------------------------------------------------------ 延遲預測 (在途指令逐段積分)
     def _delay_mats(self, dur_s):
@@ -229,12 +251,11 @@ class BalanceMPC:
         self.u_hist.append(u.copy())
         if u_l == 0.0 and u_r == 0.0:
             self.u_hist.extend([np.zeros(2)] * 4)
-            self._z_last = np.zeros(self.nz)
+            self._needs_cold_start = True
 
     # ------------------------------------------------------------ 求解
     def solve(self, x0, l_current, X_ref_traj, delay_s=0.0):
         t_start = time.perf_counter()
-        N, nx, nu = self.N, self.nx, self.nu
         rebuilt = False
 
         if abs(l_current - self._l_current) > 1e-4:
@@ -244,35 +265,17 @@ class BalanceMPC:
 
         x0p = np.asarray(self._predict_delay(x0, delay_s), float)
 
-        q = np.zeros(self.nz)
-        Xr = np.asarray(X_ref_traj, float)
-        if np.any(Xr):
-            for k in range(1, N):
-                q[(k - 1) * nx:k * nx] = -2.0 * self.Q @ Xr[:, k]
-            q[(N - 1) * nx:N * nx] = -2.0 * self.Pm @ Xr[:, N - 1]
-        q[N * nx:N * nx + nu] += -2.0 * self.R_delta @ self.u_prev
-
-        lo, hi = self._lo.copy(), self._hi.copy()
-        lo[:self._n_dyn][:nx] = hi[:self._n_dyn][:nx] = self.A_d @ x0p
-        r = self._n_dyn
-        lo[r:r + nu] = self.u_prev - self.du_vec
-        hi[r:r + nu] = self.u_prev + self.du_vec
-        lo[r + nu:r + self._n_rate] = -np.tile(self.du_vec, N - 1)
-        hi[r + nu:r + self._n_rate] = np.tile(self.du_vec, N - 1)
+        self.x0_par.value = x0p
+        self.u_prev_par.value = self.u_prev
+        self.x_ref_par.value = np.asarray(X_ref_traj, float)[:, :self.N]
 
         t_qp = time.perf_counter()
-        self.solver.update(q=q, l=lo, u=hi)
-        self.solver.warm_start(x=self._z_last)
-        res = self.solver.solve()
-        qp_status = res.info.status
-        ok = (res.x is not None and np.all(np.isfinite(res.x))
-              and (res.info.status_val in (1, 2)
-                   or (res.info.status_val == -2 and res.info.prim_res < 5e-2)))   # 迭代用盡但殘差夠小 -> 仍可用 (暖啟動下一拍會接續收斂)
+        ok, qp_status, n_iter = self._solve_qp()
         qp_ms = (time.perf_counter() - t_qp) * 1000.0
 
         timing = {"total_ms": 0.0, "qp_ms": qp_ms, "rebuilt": rebuilt,
                   "status": "optimal" if ok else qp_status, "delay_ms": delay_s * 1000.0,
-                  "iter": res.info.iter}
+                  "iter": n_iter}
 
         if not ok:
             print(f"[BalanceMPC] QP 求解失敗: {qp_status}")
@@ -281,19 +284,18 @@ class BalanceMPC:
             else:
                 u_fb = self.u_prev.copy()
             self.set_applied_u(u_fb[0], u_fb[1])
-            self._z_last = np.zeros(self.nz)
+            self._needs_cold_start = True
             timing["total_ms"] = (time.perf_counter() - t_start) * 1000.0
             self.solve_times.append(timing["total_ms"]); self.qp_solve_times.append(qp_ms)
             return u_fb, None, timing
 
-        z = res.x
-        self._z_last = z.copy()
-        u0 = np.array(z[N * nx:N * nx + nu], dtype=float)
+        X = np.array(self._x_var.value, dtype=float)
+        X[:, 0] = x0p
+        U = np.array(self._u_var.value, dtype=float)
+        u0 = U[:, 0].copy()
         self.set_applied_u(u0[0], u0[1])
 
         timing["total_ms"] = (time.perf_counter() - t_start) * 1000.0
         self.solve_times.append(timing["total_ms"])
         self.qp_solve_times.append(qp_ms)
-        X = np.column_stack([x0p] + [z[(k - 1) * nx:k * nx] for k in range(1, N + 1)])
-        U = z[N * nx:].reshape(N, nu).T
         return u0, (X, U), timing
