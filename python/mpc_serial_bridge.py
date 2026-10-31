@@ -1,7 +1,3 @@
-"""
-mpc_serial_bridge.py (配合實車辨識增益版 wbr_mpc.py)
-"""
-
 import csv
 import math
 import sys
@@ -22,7 +18,7 @@ except ImportError:
 MPC_PORT = "COM6"
 MPC_BAUD = 2000000
 
-LEG_LENGTH_M = 0.170    
+LEG_LENGTH_M = 0.170       # 虛擬腿長(重心高度)
 PITCH_SIGN = -1.0
 YAW_SIGN = +1.0
 V_REF = 0.0
@@ -30,19 +26,19 @@ V_REF = 0.0
 MPC_TIMEOUT_S = 0.3
 PRINT_EVERY = 20
 
-MPC_N = 10                 # 預測 150ms，兼顧穩定裕度與極速求解 (~0.25ms)
-MPC_TS = 0.01
+MPC_N = 8                 # 預測步數
+MPC_TS = 0.01              # MPC 控制週期
 
-FIXED_LINK_DELAY_S = 0.024 # 狀態取樣齡 + USB + 馬達電流響應；log 顯示 cmd->電流約 1~2 拍，原 18ms 偏小
+FIXED_LINK_DELAY_S = 0.024 # 狀態取樣週期
 DELAY_CAP_S = 0.050
 
-FRICTION_LEFT_NM  = 0.3   # 與 wbr_control.ino 完全對齊 (僅供 log 記錄對照)
-FRICTION_RIGHT_NM = 0.3
-FRICTION_SPEED_EPS_DPS = 20.0
+FRICTION_LEFT_NM  = 0.25     # 摩擦前饋
+FRICTION_RIGHT_NM = 0.25     # 摩擦前饋
+FRICTION_SPEED_EPS_DPS = 20.0   
 FRICTION_CMD_EPS_NM    = 0.12
 
-OMEGA_LPF_ALPHA = 0.7      # 對 pitch_rate 加入輕微一階低通，抑制微分高頻抖動
-YAW_RATE_LPF_ALPHA = 0.85  # 韌體已把 yaw rate 對 10ms 內的 IMU 取樣取平均 (抗混疊)，這裡只留很輕的低通，少一點相位落後
+OMEGA_LPF_ALPHA = 0.7      # pitch_rate 一階低通
+YAW_RATE_LPF_ALPHA = 0.85  # yaw rate 一階低通
 
 TRACK_POSITION = True
 
@@ -53,12 +49,11 @@ THETA_OFF_FREEZE_DEG = 6.0
 POS_LIMIT_M = 0.4
 
 YAW_RATE_REF = 0.0
-PSI_LIMIT_RAD = math.radians(180)
 
 LOG_PATH = f"mpc_bridge_log_{datetime.datetime.now():%Y%m%d_%H%M%S}.csv"
 LOG_FLUSH_EVERY = 20
 
-AUTO_LOCK_ON_START = True
+
 COMMAND_KEYS = "dluzxc69"
 KEY_HELP = (
     "[bridge] 按鍵：  e 啟動輪子   d 關閉輪子   l 關節自鎖   u 關節解鎖\n"
@@ -158,9 +153,6 @@ def main():
 
     sender = CmdSender(ser)
     wheels_requested = False
-    if AUTO_LOCK_ON_START:
-        print("[bridge] 啟動：請求關節自鎖 (腿移動需要幾秒，到位後再按 e)")
-        sender.send('l')
     print(KEY_HELP)
 
     print(f"[bridge] 資料將同時記錄到 {LOG_PATH}")

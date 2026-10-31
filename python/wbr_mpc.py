@@ -1,17 +1,3 @@
-"""
-wbr_mpc.py (實車辨識增益版，CVXPY 寫法)
-
-QP 以 CVXPY 依數學式直接寫出 (見 _build_problem)，底層仍用 OSQP 求解，
-每拍只更新 cp.Parameter，不重新建模。需要 cvxpy >= 1.3 與 osqp。
-
-與前一版相比的關鍵修正：
-  1. [根因] 俯仰輸入增益：由 log 辨識，實車「扭矩 -> 俯仰角加速度」約為教科書模型的 2.9 倍
-     (速度通道約 1.3 倍)。舊模型低估增益 -> MPC 輸出過大 -> 20ms 延遲下產生 ~5.5Hz 飽和極限環。
-     以 pitch_input_gain / vel_input_gain 修正 B 矩陣。
-  2. 延遲預測：依「在途指令」逐段積分 (最近 2~3 拍指令尚未作用)，不再只用兩段近似。
-  3. Yaw 慣量還原為物理值 (舊版改成 0.362 並無 log 依據：該 log 的 yaw 幾乎沒被激發)。
-  4. 權重 / 限幅依新模型重新整定；du_max 不再過度壓低，以免吃掉相位裕度。
-"""
 import time
 from collections import deque
 import numpy as np
@@ -22,7 +8,7 @@ from scipy.linalg import expm, solve_discrete_are
 
 # ---------------------------------------------------------------- 調參區
 #            [p,    v,   theta, omega, psi_err, psi_dot]
-Q_DIAG    = [10.0, 5.0, 200.0, 15.0, 15.0, 2.0]   # theta/omega 為主；yaw 頻寬刻意壓低 (~2Hz)，對 2~3.5x 增益誤差與 50ms 延遲仍穩定
+Q_DIAG    = [10.0, 45.0, 200.0, 15.0, 15.0, 2.0]  
 R_U_DIAG  = [0.3, 0.3]    # [u_l, u_r]
 R_DU_DIAG = [0.5, 0.5]   # [u_l, u_r]
 

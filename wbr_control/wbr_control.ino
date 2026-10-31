@@ -42,8 +42,8 @@ const uint32_t IMU_TIMEOUT_MS    = 50;    // 輪子運轉中超過這麼久沒�
 const bool ALLOW_LOCAL_SERIAL_CMD = false;
 
 // ================= 輪摩擦前饋設定 ================= 
-const double FRICTION_LEFT_NM   = 0.3;
-const double FRICTION_RIGHT_NM  = 0.3;
+const double FRICTION_LEFT_NM   = 0.25;
+const double FRICTION_RIGHT_NM  = 0.25;
 const double FRICTION_SPEED_EPS_DPS = 20.0;
 const double FRICTION_CMD_EPS_NM    = 0.05;
 
